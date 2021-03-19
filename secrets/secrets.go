@@ -1,7 +1,11 @@
 package secrets
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -12,9 +16,11 @@ import (
 	"sort"
 
 	"github.com/wojciech-malota-wojcik/legacy/config"
+	"github.com/wojciech-malota-wojcik/legacy/yubi"
 	"golang.org/x/crypto/argon2"
-	"golang.org/x/crypto/ed25519"
 )
+
+const aesKeySize = 32
 
 type SeedNode struct {
 	Data []byte           `json:"d,omitempty"`
@@ -36,17 +42,53 @@ func Generate() error {
 	secret := SharedSecret{Seed: SeedNode{Data: seed}}
 
 	buildSeedTree(&secret.Seed, map[int]bool{})
-	if err := os.Mkdir("./parts", 0o755); err != nil {
+	if err := os.Mkdir("./parts", 0o755); err != nil && !os.IsExist(err) {
 		return err
 	}
-	for i := range config.Successors {
+	if err := os.Mkdir("./keys", 0o755); err != nil && !os.IsExist(err) {
+		return err
+	}
+	for i, s := range config.Successors {
 		var sTree SeedNode
 		successorTree(&secret.Seed, &sTree, i)
 		rawTree, err := json.Marshal(sTree)
 		if err != nil {
 			panic(err)
 		}
-		if err := ioutil.WriteFile(fmt.Sprintf("./parts/%d.json", i), rawTree, 0o644); err != nil {
+
+		// encrypt part file using symmetric key
+
+		fileKey := make([]byte, aesKeySize)
+		if _, err := rand.Read(fileKey); err != nil {
+			return err
+		}
+		block, err := aes.NewCipher(fileKey)
+		if err != nil {
+			return err
+		}
+
+		encrypted := make([]byte, block.BlockSize()+len(rawTree))
+		iv := encrypted[:block.BlockSize()]
+		if _, err := rand.Read(iv); err != nil {
+			return err
+		}
+		stream := cipher.NewCFBEncrypter(block, iv)
+		stream.XORKeyStream(encrypted[block.BlockSize():], rawTree)
+		if err := ioutil.WriteFile(fmt.Sprintf("./parts/%d.secret", i), encrypted, 0o444); err != nil {
+			return err
+		}
+
+		// encrypt symmetric key using public key of successor
+
+		pubKey, err := x509.ParsePKCS1PublicKey(s.PublicKey)
+		if err != nil {
+			return err
+		}
+		encryptedKey, err := rsa.EncryptPKCS1v15(rand.Reader, pubKey, fileKey)
+		if err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(fmt.Sprintf("./keys/%d.secret", i), encryptedKey, 0o444); err != nil {
 			return err
 		}
 	}
@@ -56,12 +98,37 @@ func Generate() error {
 func Integrate() error {
 	var masterTree SeedNode
 	for i := range config.Successors {
-		raw, err := ioutil.ReadFile(fmt.Sprintf("./parts/%d.json", i))
+		// decrypt symmetric key using YubiKey of successor
+
+		encryptedKey, err := ioutil.ReadFile(fmt.Sprintf("./keys/%d.secret", i))
 		if err != nil {
 			return err
 		}
+		fileKey, err := yubi.Decrypt(encryptedKey)
+		if err != nil {
+			return err
+		}
+
+		// decrypt part file using symmetric key
+
+		block, err := aes.NewCipher(fileKey)
+		if err != nil {
+			return err
+		}
+
+		rawTree, err := ioutil.ReadFile(fmt.Sprintf("./parts/%d.secret", i))
+		if err != nil {
+			return err
+		}
+
+		iv := rawTree[:block.BlockSize()]
+		rawTree = rawTree[block.BlockSize():]
+
+		stream := cipher.NewCFBDecrypter(block, iv)
+		stream.XORKeyStream(rawTree, rawTree)
+
 		var sTree SeedNode
-		if err := json.Unmarshal(raw, &sTree); err != nil {
+		if err := json.Unmarshal(rawTree, &sTree); err != nil {
 			return err
 		}
 		integrate(&masterTree, &sTree)
@@ -236,7 +303,6 @@ func buildPrivateKey(seed []byte) {
 			fmt.Printf("Progress: %d%%\n", progress)
 		}
 	}
-	keySeed := argon2.Key(seed, []byte("some very very random bytes for salt"), 5, 128*1024, 4, ed25519.SeedSize)
-	privKey := ed25519.NewKeyFromSeed(keySeed)
-	fmt.Printf("%#v\n", []byte(privKey))
+	key := argon2.Key(seed, []byte("some very very random bytes for salt"), 5, 128*1024, 4, aesKeySize)
+	fmt.Printf("%#v\n", []byte(key))
 }
