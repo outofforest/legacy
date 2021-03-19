@@ -2,6 +2,7 @@ package config
 
 const RequiredToDecrypt = 3
 const SeedSize = 1000000
+const SeedToKeySteps = 1000
 
 type Successor struct {
 	Name      string

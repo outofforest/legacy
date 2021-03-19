@@ -1,8 +1,8 @@
 package secrets
 
 import (
-	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,8 +10,10 @@ import (
 	"math"
 	"sort"
 
-	"github.com/wojciech-malota-wojcik/legacy/config"
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/ed25519"
+
+	"github.com/wojciech-malota-wojcik/legacy/config"
 )
 
 type SeedNode struct {
@@ -25,6 +27,8 @@ type SharedSecret struct {
 }
 
 func Generate() error {
+	knownParts()
+
 	seed := make([]byte, config.SeedSize)
 	if _, err := rand.Read(seed); err != nil {
 		return err
@@ -68,9 +72,7 @@ func Integrate() error {
 	if masterTree.Data == nil {
 		return errors.New("not enough YubiKeys to decrypt data")
 	}
-	keySeed := argon2.Key(masterTree.Data, []byte("some very very random bytes for salt"), 5, 128*1024, 4, ed25519.SeedSize)
-	privKey := ed25519.NewKeyFromSeed(keySeed)
-	fmt.Printf("%#v\n", []byte(privKey))
+	buildPrivateKey(masterTree.Data)
 	return nil
 }
 
@@ -127,6 +129,9 @@ func successorTree(masterNode *SeedNode, successorNode *SeedNode, successorIndex
 }
 
 func integrate(masterNode *SeedNode, successorNode *SeedNode) {
+	if masterNode.Data != nil {
+		return
+	}
 	if successorNode.Data != nil {
 		masterNode.Data = successorNode.Data
 		return
@@ -146,6 +151,7 @@ func integrate(masterNode *SeedNode, successorNode *SeedNode) {
 
 func fill(masterNode *SeedNode, stack map[int]bool) {
 	if masterNode.Data != nil {
+		masterNode.Sub = nil
 		return
 	}
 	expectedChildren := len(config.Successors) - len(stack)
@@ -181,4 +187,53 @@ func progress(masterNode *SeedNode) int {
 		res += progress(&sN)
 	}
 	return res
+}
+
+func knownParts() {
+	leafLen := 1
+	for i := len(config.Successors); i >= config.RequiredToDecrypt; i-- {
+		leafLen *= i
+	}
+	bytesInLeaf := int(math.Floor(float64(config.SeedSize) / float64(leafLen)))
+	fmt.Printf("Bytes in leaf: %d\n", bytesInLeaf)
+	if bytesInLeaf < 5 {
+		panic("minimum required bytes per leaf is 5, use longer seed")
+	}
+	sLen := len(config.Successors)
+	for i := 1; i <= config.RequiredToDecrypt; i++ {
+		known := 0.
+		for j := sLen; j >= config.RequiredToDecrypt; j-- {
+			known += (1. - known) * float64(i) / float64(j)
+		}
+		missingBytes := int(math.Floor((1. - known) * float64(config.SeedSize)))
+		fmt.Printf("Knowledge owned by %d successor(s): %d%%, Missing bytes: %d\n", i, int(math.Round(100.*known)), missingBytes)
+	}
+}
+
+func buildPrivateKey(seed []byte) {
+	preSalt := make([]byte, 8)
+	salt := []byte{
+		seed[0],
+		seed[len(seed)-1],
+		seed[len(seed)/2],
+		seed[len(seed)/3],
+		seed[2*len(seed)/3],
+		seed[len(seed)/4],
+		seed[3*len(seed)/4],
+		seed[3*len(seed)/5],
+	}
+	progress := 0
+	for i := 0; i < config.SeedToKeySteps; i++ {
+		binary.LittleEndian.PutUint64(preSalt, uint64(i))
+		salt = argon2.Key(salt, preSalt, 2, 16*1024, 1, uint32(len(salt)))
+		seed = argon2.Key(seed, salt, 3, 64*1024, 3, uint32(len(seed)))
+		newProgress := 100 * (i + 1) / config.SeedToKeySteps
+		if newProgress != progress {
+			progress = newProgress
+			fmt.Printf("Progress: %d%%\n", progress)
+		}
+	}
+	keySeed := argon2.Key(seed, []byte("some very very random bytes for salt"), 5, 128*1024, 4, ed25519.SeedSize)
+	privKey := ed25519.NewKeyFromSeed(keySeed)
+	fmt.Printf("%#v\n", []byte(privKey))
 }
