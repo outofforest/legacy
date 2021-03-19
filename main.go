@@ -2,11 +2,16 @@ package main
 
 import (
 	"fmt"
-	"github.com/wojciech-malota-wojcik/legacy/secrets"
 	"os"
+	"path/filepath"
+
+	"github.com/ridge/must"
+	"github.com/wojciech-malota-wojcik/legacy/secrets"
 )
 
 func main() {
+	changeWorkingDir()
+
 	var err error
 	defer func() {
 		if err != nil {
@@ -22,4 +27,8 @@ func main() {
 	}
 	err = secrets.Integrate()
 	//err = yubi.Test()
+}
+
+func changeWorkingDir() {
+	must.OK(os.Chdir(filepath.Dir(must.String(filepath.EvalSymlinks(must.String(os.Executable()))))))
 }

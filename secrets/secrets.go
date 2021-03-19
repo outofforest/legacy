@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"os"
 	"sort"
 
+	"github.com/wojciech-malota-wojcik/legacy/config"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/ed25519"
-
-	"github.com/wojciech-malota-wojcik/legacy/config"
 )
 
 type SeedNode struct {
@@ -36,6 +36,9 @@ func Generate() error {
 	secret := SharedSecret{Seed: SeedNode{Data: seed}}
 
 	buildSeedTree(&secret.Seed, map[int]bool{})
+	if err := os.Mkdir("./parts", 0o755); err != nil {
+		return err
+	}
 	for i := range config.Successors {
 		var sTree SeedNode
 		successorTree(&secret.Seed, &sTree, i)
@@ -43,7 +46,7 @@ func Generate() error {
 		if err != nil {
 			panic(err)
 		}
-		if err := ioutil.WriteFile(fmt.Sprintf("./%d.json", i), rawTree, 0o644); err != nil {
+		if err := ioutil.WriteFile(fmt.Sprintf("./parts/%d.json", i), rawTree, 0o644); err != nil {
 			return err
 		}
 	}
@@ -53,7 +56,7 @@ func Generate() error {
 func Integrate() error {
 	var masterTree SeedNode
 	for i := range config.Successors {
-		raw, err := ioutil.ReadFile(fmt.Sprintf("./%d.json", i))
+		raw, err := ioutil.ReadFile(fmt.Sprintf("./parts/%d.json", i))
 		if err != nil {
 			return err
 		}
