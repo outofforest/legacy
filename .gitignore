@@ -1,3 +1,4 @@
 .idea
-parts
-bin
+/parts
+/bin/*
+!/bin/legacy

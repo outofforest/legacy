@@ -1,7 +1,8 @@
-package main
+package build
 
 import (
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -9,51 +10,16 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"log"
-	"math"
-	"os"
-	"text/template"
-
+	"github.com/wojciech-malota-wojcik/build"
 	"github.com/wojciech-malota-wojcik/legacy/config"
 	"github.com/wojciech-malota-wojcik/legacy/types"
-	"github.com/wojciech-malota-wojcik/legacy/util"
+	"html/template"
+	"io/ioutil"
+	"math"
+	"os"
 )
 
-const tpl = `package parts
-
-import "github.com/wojciech-malota-wojcik/legacy/types"
-
-var Successors = []types.Successor{
-	{{- range $val := . }}
-    successor{{ $val }},{{ end }}
-}
-`
-
-const tplSuccessor = `package parts
-
-import "github.com/wojciech-malota-wojcik/legacy/types"
-
-var successor{{ .Index }} = {{ .Data }}
-`
-
-var sTpl = template.Must(template.New("").Parse(tpl))
-var sTplSuccessor = template.Must(template.New("").Parse(tplSuccessor))
-
-type successorEntry struct {
-	Index int
-	Data  types.Successor
-}
-
-func main() {
-	util.WorkingDir(1)
-
-	if err := generate(); err != nil {
-		log.Fatal(err)
-	}
-}
-
-func generate() error {
+func generateLegacy() error {
 	knownParts()
 
 	seed := make([]byte, config.SeedSize)
@@ -126,6 +92,36 @@ func generate() error {
 		return err
 	}
 	return nil
+}
+
+func buildLegacy(ctx context.Context, deps build.DepsFunc) error {
+	deps(generateLegacy)
+	return goBuildPkg(ctx, ".", "bin/legacy-bin")
+}
+
+const tpl = `package parts
+
+import "github.com/wojciech-malota-wojcik/legacy/types"
+
+var Successors = []types.Successor{
+	{{- range $val := . }}
+    successor{{ $val }},{{ end }}
+}
+`
+
+const tplSuccessor = `package parts
+
+import "github.com/wojciech-malota-wojcik/legacy/types"
+
+var successor{{ .Index }} = {{ .Data }}
+`
+
+var sTpl = template.Must(template.New("").Parse(tpl))
+var sTplSuccessor = template.Must(template.New("").Parse(tplSuccessor))
+
+type successorEntry struct {
+	Index int
+	Data  types.Successor
 }
 
 func knownParts() {
