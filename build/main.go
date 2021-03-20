@@ -8,8 +8,9 @@ import (
 )
 
 func main() {
-	util.WorkingDir(0)
-	if err := secrets.Integrate(); err != nil {
+	util.WorkingDir(1)
+
+	if err := secrets.Generate(); err != nil {
 		log.Fatal(err)
 	}
 }

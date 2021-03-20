@@ -80,7 +80,7 @@ func Generate() error {
 
 		// encrypt symmetric key using public key of successor
 
-		pubKey, err := x509.ParsePKCS1PublicKey(s.PublicKey)
+		pubKey, err := x509.ParsePKCS1PublicKey(s)
 		if err != nil {
 			return err
 		}
@@ -293,6 +293,7 @@ func buildPrivateKey(seed []byte) {
 		seed[3*len(seed)/5],
 	}
 	progress := 0
+	fmt.Printf("Progress: %d%%\n", progress)
 	for i := 0; i < config.SeedToKeySteps; i++ {
 		binary.LittleEndian.PutUint64(preSalt, uint64(i))
 		salt = argon2.Key(salt, preSalt, 2, 16*1024, 1, uint32(len(salt)))

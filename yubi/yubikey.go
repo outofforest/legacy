@@ -36,11 +36,10 @@ func Test() error {
 				return errors.New("wrong format of public key on YubiKey, RSA expected")
 			}
 
-			successor, err := findSuccessor(pubKey)
+			_, err = findSuccessor(pubKey)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Hello %s\n", successor.Name)
 		}
 	}
 	return nil
@@ -73,11 +72,10 @@ func Decrypt(ciphertext []byte) ([]byte, error) {
 			return nil, errors.New("wrong format of public key on YubiKey, RSA expected")
 		}
 
-		successor, err := findSuccessor(pubKey)
+		_, err = findSuccessor(pubKey)
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("Hello %s\n", successor.Name)
 
 		if pin == "" {
 			fmt.Println("YubiKey PIN:")
@@ -97,14 +95,14 @@ func Decrypt(ciphertext []byte) ([]byte, error) {
 	return nil, errors.New("no YubiKey detected")
 }
 
-func findSuccessor(pubKey *rsa.PublicKey) (config.Successor, error) {
+func findSuccessor(pubKey *rsa.PublicKey) ([]byte, error) {
 	raw := x509.MarshalPKCS1PublicKey(pubKey)
 	for _, s := range config.Successors {
-		if bytes.Equal(raw, s.PublicKey) {
+		if bytes.Equal(raw, s) {
 			return s, nil
 		}
 	}
-	return config.Successor{}, errors.New("successor not recognized based on public key stored on YubiKey")
+	return nil, errors.New("successor not recognized based on public key stored on YubiKey")
 }
 
 func readline() string {
