@@ -15,38 +15,9 @@ import (
 	"strings"
 )
 
-func Test() error {
-	cards, err := piv.Cards()
-	if err != nil {
-		return err
-	}
-	for _, card := range cards {
-		if strings.Contains(strings.ToLower(card), "yubikey") {
-			yk, err := piv.Open(card)
-			if err != nil {
-				return err
-			}
-			cert, err := yk.Certificate(piv.SlotAuthentication)
-			if err != nil {
-				return err
-			}
-
-			pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
-			if !ok {
-				return errors.New("wrong format of public key on YubiKey, RSA expected")
-			}
-
-			_, err = findSuccessor(pubKey)
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 var pin string
 
+// Decrypt decrypts AES key used to encrypt successor's part using private key stored on YubiKey
 func Decrypt(ciphertext []byte) ([]byte, error) {
 	cards, err := piv.Cards()
 	if err != nil {

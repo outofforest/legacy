@@ -22,16 +22,12 @@ import (
 
 const aesKeySize = 32
 
-type SeedNode struct {
+type seedNode struct {
 	Data []byte           `json:"d,omitempty"`
-	Sub  map[int]SeedNode `json:"s,omitempty"`
+	Sub  map[int]seedNode `json:"s,omitempty"`
 }
 
-type SharedSecret struct {
-	PublicKey []byte
-	Seed      SeedNode
-}
-
+// Generate generates parts of seed and encrypt them using successor keys
 func Generate() error {
 	knownParts()
 
@@ -39,9 +35,8 @@ func Generate() error {
 	if _, err := rand.Read(seed); err != nil {
 		return err
 	}
-	secret := SharedSecret{Seed: SeedNode{Data: seed}}
-
-	buildSeedTree(&secret.Seed, map[int]bool{})
+	masterTree := seedNode{Data: seed}
+	buildSeedTree(&masterTree, map[int]bool{})
 	if err := os.Mkdir("./parts", 0o755); err != nil && !os.IsExist(err) {
 		return err
 	}
@@ -49,8 +44,8 @@ func Generate() error {
 		return err
 	}
 	for i, s := range config.Successors {
-		var sTree SeedNode
-		successorTree(&secret.Seed, &sTree, i)
+		var sTree seedNode
+		successorTree(&masterTree, &sTree, i)
 		rawTree, err := json.Marshal(sTree)
 		if err != nil {
 			panic(err)
@@ -95,8 +90,9 @@ func Generate() error {
 	return nil
 }
 
+// Integrate decrypts parts owned by successors, integrates them into seed and decrypts data
 func Integrate() error {
-	var masterTree SeedNode
+	var masterTree seedNode
 	for i := range config.Successors {
 		// decrypt symmetric key using YubiKey of successor
 
@@ -127,7 +123,7 @@ func Integrate() error {
 		stream := cipher.NewCFBDecrypter(block, iv)
 		stream.XORKeyStream(rawTree, rawTree)
 
-		var sTree SeedNode
+		var sTree seedNode
 		if err := json.Unmarshal(rawTree, &sTree); err != nil {
 			return err
 		}
@@ -146,12 +142,12 @@ func Integrate() error {
 	return nil
 }
 
-func buildSeedTree(node *SeedNode, stack map[int]bool) {
+func buildSeedTree(node *seedNode, stack map[int]bool) {
 	numOfBuckets := len(config.Successors) - len(stack)
 	if numOfBuckets < config.RequiredToDecrypt {
 		return
 	}
-	node.Sub = map[int]SeedNode{}
+	node.Sub = map[int]seedNode{}
 	buckets := equalDiv(node.Data, numOfBuckets)
 	bI := 0
 	for i := range config.Successors {
@@ -162,7 +158,7 @@ func buildSeedTree(node *SeedNode, stack map[int]bool) {
 			return
 		}
 		stack[i] = true
-		subNode := SeedNode{Data: buckets[bI]}
+		subNode := seedNode{Data: buckets[bI]}
 		buildSeedTree(&subNode, stack)
 		node.Sub[i] = subNode
 		bI += 1
@@ -180,16 +176,16 @@ func equalDiv(data []byte, numOfBuckets int) [][]byte {
 	return buckets
 }
 
-func successorTree(masterNode *SeedNode, successorNode *SeedNode, successorIndex int) {
+func successorTree(masterNode *seedNode, successorNode *seedNode, successorIndex int) {
 	if masterNode.Sub == nil {
 		return
 	}
-	successorNode.Sub = map[int]SeedNode{}
+	successorNode.Sub = map[int]seedNode{}
 	for i, mN := range masterNode.Sub {
 		if i == successorIndex {
-			successorNode.Sub[i] = SeedNode{Data: mN.Data}
+			successorNode.Sub[i] = seedNode{Data: mN.Data}
 		} else {
-			var node SeedNode
+			var node seedNode
 			successorTree(&mN, &node, successorIndex)
 			if node.Sub != nil {
 				successorNode.Sub[i] = node
@@ -198,7 +194,7 @@ func successorTree(masterNode *SeedNode, successorNode *SeedNode, successorIndex
 	}
 }
 
-func integrate(masterNode *SeedNode, successorNode *SeedNode) {
+func integrate(masterNode *seedNode, successorNode *seedNode) {
 	if masterNode.Data != nil {
 		return
 	}
@@ -207,19 +203,19 @@ func integrate(masterNode *SeedNode, successorNode *SeedNode) {
 		return
 	}
 	if masterNode.Sub == nil {
-		masterNode.Sub = map[int]SeedNode{}
+		masterNode.Sub = map[int]seedNode{}
 	}
 	for i, sN := range successorNode.Sub {
 		node, ok := masterNode.Sub[i]
 		if !ok {
-			node = SeedNode{}
+			node = seedNode{}
 		}
 		integrate(&node, &sN)
 		masterNode.Sub[i] = node
 	}
 }
 
-func fill(masterNode *SeedNode, stack map[int]bool) {
+func fill(masterNode *seedNode, stack map[int]bool) {
 	if masterNode.Data != nil {
 		masterNode.Sub = nil
 		return
@@ -248,7 +244,7 @@ func fill(masterNode *SeedNode, stack map[int]bool) {
 	masterNode.Data = data
 }
 
-func progress(masterNode *SeedNode) int {
+func progress(masterNode *seedNode) int {
 	if masterNode.Data != nil {
 		return len(masterNode.Data)
 	}

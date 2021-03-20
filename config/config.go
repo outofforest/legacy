@@ -1,7 +1,12 @@
 package config
 
+// RequiredToDecrypt specifies how many successors have to load their keys to decrypt data
 const RequiredToDecrypt = 3
+
+// SeedSize is the byte size of generated seed
 const SeedSize = 1000000
+
+// SeedToKeySteps specifies how many hashing steps is made to convert initial seed to the one used to generate decryption key
 const SeedToKeySteps = 1000
 
 var (
