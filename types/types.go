@@ -9,9 +9,7 @@ type Successor struct {
 	Part      []byte
 }
 
-type Successors []Successor
-
-func (s Successors) String() string {
+func (s Successor) String() string {
 	return fmt.Sprintf("%#v", s)
 }
 

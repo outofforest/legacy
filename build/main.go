@@ -24,10 +24,26 @@ const tpl = `package parts
 
 import "github.com/wojciech-malota-wojcik/legacy/types"
 
-var Successors = {{ . }}
+var Successors = []types.Successor{
+	{{- range $val := . }}
+    successor{{ $val }},{{ end }}
+}
+`
+
+const tplSuccessor = `package parts
+
+import "github.com/wojciech-malota-wojcik/legacy/types"
+
+var successor{{ .Index }} = {{ .Data }}
 `
 
 var sTpl = template.Must(template.New("").Parse(tpl))
+var sTplSuccessor = template.Must(template.New("").Parse(tplSuccessor))
+
+type successorEntry struct {
+	Index int
+	Data  types.Successor
+}
 
 func main() {
 	util.WorkingDir(1)
@@ -50,7 +66,7 @@ func generate() error {
 		return err
 	}
 
-	var ss types.Successors
+	ss := make([]int, 0, len(config.Successors))
 	for i, s := range config.Successors {
 		var sTree types.SeedNode
 		successorTree(&masterTree, &sTree, i)
@@ -93,7 +109,14 @@ func generate() error {
 			return err
 		}
 
-		ss = append(ss, sInfo)
+		buf := &bytes.Buffer{}
+		if err := sTplSuccessor.Execute(buf, successorEntry{Index: i, Data: sInfo}); err != nil {
+			return err
+		}
+		if err := ioutil.WriteFile(fmt.Sprintf("./parts/s%d.go", i), buf.Bytes(), 0o444); err != nil {
+			return err
+		}
+		ss = append(ss, i)
 	}
 	buf := &bytes.Buffer{}
 	if err := sTpl.Execute(buf, ss); err != nil {
