@@ -10,28 +10,65 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/wojciech-malota-wojcik/build"
-	"github.com/wojciech-malota-wojcik/legacy/config"
-	"github.com/wojciech-malota-wojcik/legacy/types"
-	"html/template"
 	"io/ioutil"
 	"math"
 	"os"
+	"text/template"
+
+	"github.com/wojciech-malota-wojcik/build"
+	"github.com/wojciech-malota-wojcik/legacy/config"
+	"github.com/wojciech-malota-wojcik/legacy/types"
+	"github.com/wojciech-malota-wojcik/legacy/util"
 )
 
 func generateLegacy() error {
 	knownParts()
 
-	seed := make([]byte, config.SeedSize)
-	if _, err := rand.Read(seed); err != nil {
-		return err
-	}
-	masterTree := types.SeedNode{Data: seed}
-	buildSeedTree(&masterTree, map[int]bool{})
 	if err := os.Mkdir("./parts", 0o755); err != nil && !os.IsExist(err) {
 		return err
 	}
 
+	seed := make([]byte, config.SeedSize)
+	if _, err := rand.Read(seed); err != nil {
+		return err
+	}
+
+	// encrypt data using symmetric key
+
+	key := util.BuildPrivateKey(seed)
+	rawData, err := ioutil.ReadFile("./data.img")
+	if err != nil {
+		return err
+	}
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	data := types.Data{
+		IV:   make([]byte, block.BlockSize()),
+		Data: make([]byte, len(rawData)),
+	}
+
+	if _, err := rand.Read(data.IV); err != nil {
+		return err
+	}
+	stream := cipher.NewCFBEncrypter(block, data.IV)
+	stream.XORKeyStream(data.Data, rawData)
+
+	buf := &bytes.Buffer{}
+	if err := pTplData.Execute(buf, data); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile("./parts/data.go", buf.Bytes(), 0o444); err != nil {
+		return err
+	}
+
+	// create parts
+
+	masterTree := types.SeedNode{Data: seed}
+	buildSeedTree(&masterTree, map[int]bool{})
 	ss := make([]int, 0, len(config.Successors))
 	for i, s := range config.Successors {
 		var sTree types.SeedNode
@@ -76,7 +113,7 @@ func generateLegacy() error {
 		}
 
 		buf := &bytes.Buffer{}
-		if err := sTplSuccessor.Execute(buf, successorEntry{Index: i, Data: sInfo}); err != nil {
+		if err := pTplSuccessor.Execute(buf, successorEntry{Index: i, Data: sInfo}); err != nil {
 			return err
 		}
 		if err := ioutil.WriteFile(fmt.Sprintf("./parts/s%d.go", i), buf.Bytes(), 0o444); err != nil {
@@ -84,8 +121,8 @@ func generateLegacy() error {
 		}
 		ss = append(ss, i)
 	}
-	buf := &bytes.Buffer{}
-	if err := sTpl.Execute(buf, ss); err != nil {
+	buf = &bytes.Buffer{}
+	if err := pTplSuccessors.Execute(buf, ss); err != nil {
 		return err
 	}
 	if err := ioutil.WriteFile("./parts/parts.go", buf.Bytes(), 0o444); err != nil {
@@ -96,10 +133,10 @@ func generateLegacy() error {
 
 func buildLegacy(ctx context.Context, deps build.DepsFunc) error {
 	deps(generateLegacy)
-	return goBuildPkg(ctx, ".", "bin/legacy-bin")
+	return goBuildPkg(ctx, ".", "bin/my-legacy")
 }
 
-const tpl = `package parts
+const tplSuccessors = `package parts
 
 import "github.com/wojciech-malota-wojcik/legacy/types"
 
@@ -116,8 +153,16 @@ import "github.com/wojciech-malota-wojcik/legacy/types"
 var successor{{ .Index }} = {{ .Data }}
 `
 
-var sTpl = template.Must(template.New("").Parse(tpl))
-var sTplSuccessor = template.Must(template.New("").Parse(tplSuccessor))
+const tplData = `package parts
+
+import "github.com/wojciech-malota-wojcik/legacy/types"
+
+var Data = {{ . }}
+`
+
+var pTplSuccessors = template.Must(template.New("").Parse(tplSuccessors))
+var pTplSuccessor = template.Must(template.New("").Parse(tplSuccessor))
+var pTplData = template.Must(template.New("").Parse(tplData))
 
 type successorEntry struct {
 	Index int
@@ -153,7 +198,7 @@ func buildSeedTree(node *types.SeedNode, stack map[int]bool) {
 	node.Sub = map[int]types.SeedNode{}
 	buckets := equalDiv(node.Data, numOfBuckets)
 	bI := 0
-	for i := range config.Successors {
+	for i := 0; i < len(config.Successors); i++ {
 		if stack[i] {
 			continue
 		}

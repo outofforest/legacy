@@ -3,10 +3,10 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"sort"
@@ -16,7 +16,6 @@ import (
 	"github.com/wojciech-malota-wojcik/legacy/types"
 	"github.com/wojciech-malota-wojcik/legacy/util"
 	"github.com/wojciech-malota-wojcik/legacy/yubi"
-	"golang.org/x/crypto/argon2"
 )
 
 func main() {
@@ -63,8 +62,18 @@ func integrate() error {
 	if masterTree.Data == nil {
 		return errors.New("not enough YubiKeys to decrypt data")
 	}
-	buildPrivateKey(masterTree.Data)
-	return nil
+	key := util.BuildPrivateKey(masterTree.Data)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	rawData := make([]byte, len(parts.Data.Data))
+
+	stream := cipher.NewCFBDecrypter(block, parts.Data.IV)
+	stream.XORKeyStream(rawData, parts.Data.Data)
+
+	return ioutil.WriteFile("./data.img", rawData, 0o444)
 }
 
 func integratePart(masterNode *types.SeedNode, successorNode *types.SeedNode) {
@@ -73,6 +82,7 @@ func integratePart(masterNode *types.SeedNode, successorNode *types.SeedNode) {
 	}
 	if successorNode.Data != nil {
 		masterNode.Data = successorNode.Data
+		masterNode.Sub = nil
 		return
 	}
 	if masterNode.Sub == nil {
@@ -90,7 +100,6 @@ func integratePart(masterNode *types.SeedNode, successorNode *types.SeedNode) {
 
 func fill(masterNode *types.SeedNode, stack map[int]bool) {
 	if masterNode.Data != nil {
-		masterNode.Sub = nil
 		return
 	}
 	expectedChildren := len(config.Successors) - len(stack)
@@ -114,7 +123,17 @@ func fill(masterNode *types.SeedNode, stack map[int]bool) {
 		masterNode.Sub[k] = node
 		data = append(data, node.Data...)
 	}
-	masterNode.Data = data
+	dLen := 0
+	for _, k := range keys {
+		dLen += len(masterNode.Sub[k].Data)
+	}
+	masterNode.Data = make([]byte, 0, dLen)
+	for i := 0; i < dLen; i++ {
+		j := i / expectedChildren
+		k := i % expectedChildren
+		masterNode.Data = append(masterNode.Data, masterNode.Sub[keys[k]].Data[j])
+	}
+	masterNode.Sub = nil
 }
 
 func progress(masterNode *types.SeedNode) int {
@@ -126,32 +145,4 @@ func progress(masterNode *types.SeedNode) int {
 		res += progress(&sN)
 	}
 	return res
-}
-
-func buildPrivateKey(seed []byte) {
-	preSalt := make([]byte, 8)
-	salt := []byte{
-		seed[0],
-		seed[len(seed)-1],
-		seed[len(seed)/2],
-		seed[len(seed)/3],
-		seed[2*len(seed)/3],
-		seed[len(seed)/4],
-		seed[3*len(seed)/4],
-		seed[3*len(seed)/5],
-	}
-	progress := 0
-	fmt.Printf("Progress: %d%%\n", progress)
-	for i := 0; i < config.SeedToKeySteps; i++ {
-		binary.LittleEndian.PutUint64(preSalt, uint64(i))
-		salt = argon2.Key(salt, preSalt, 2, 16*1024, 1, uint32(len(salt)))
-		seed = argon2.Key(seed, salt, 3, 64*1024, 3, uint32(len(seed)))
-		newProgress := 100 * (i + 1) / config.SeedToKeySteps
-		if newProgress != progress {
-			progress = newProgress
-			fmt.Printf("Progress: %d%%\n", progress)
-		}
-	}
-	key := argon2.Key(seed, []byte("some very very random bytes for salt"), 5, 128*1024, 4, config.AESKeySize)
-	fmt.Printf("%#v\n", []byte(key))
 }

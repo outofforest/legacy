@@ -10,7 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/go-piv/piv-go/piv"
-	"github.com/wojciech-malota-wojcik/legacy/config"
+	"github.com/wojciech-malota-wojcik/legacy/parts"
+	"github.com/wojciech-malota-wojcik/legacy/types"
 	"os"
 	"strings"
 )
@@ -66,14 +67,14 @@ func Decrypt(ciphertext []byte) ([]byte, error) {
 	return nil, errors.New("no YubiKey detected")
 }
 
-func findSuccessor(pubKey *rsa.PublicKey) ([]byte, error) {
+func findSuccessor(pubKey *rsa.PublicKey) (types.Successor, error) {
 	raw := x509.MarshalPKCS1PublicKey(pubKey)
-	for _, s := range config.Successors {
-		if bytes.Equal(raw, s) {
+	for _, s := range parts.Successors {
+		if bytes.Equal(raw, s.PublicKey) {
 			return s, nil
 		}
 	}
-	return nil, errors.New("successor not recognized based on public key stored on YubiKey")
+	return types.Successor{}, errors.New("successor not recognized based on public key stored on YubiKey")
 }
 
 func readline() string {
