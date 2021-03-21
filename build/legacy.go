@@ -9,18 +9,51 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"math"
 	"os"
+	"strings"
 	"text/template"
 
+	"github.com/go-piv/piv-go/piv"
 	"github.com/wojciech-malota-wojcik/build"
 	"github.com/wojciech-malota-wojcik/ioc"
 	"github.com/wojciech-malota-wojcik/legacy/config"
 	"github.com/wojciech-malota-wojcik/legacy/types"
 	"github.com/wojciech-malota-wojcik/legacy/util"
 )
+
+func printPublicKey() error {
+	cards, err := piv.Cards()
+	if err != nil {
+		return err
+	}
+	for _, card := range cards {
+		if !strings.Contains(strings.ToLower(card), "yubikey") {
+			continue
+		}
+		yk, err := piv.Open(card)
+		if err != nil {
+			return err
+		}
+		defer yk.Close()
+
+		cert, err := yk.Certificate(piv.SlotSignature)
+		if err != nil {
+			return err
+		}
+
+		pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return errors.New("wrong format of public key on YubiKey, RSA expected")
+		}
+
+		fmt.Printf("Public key of %s:\n\n%#v\n\n", cert.Subject.CommonName, x509.MarshalPKCS1PublicKey(pubKey))
+	}
+	return nil
+}
 
 func buildLegacyProd(c *ioc.Container, deps build.DepsFunc) {
 	c.Singleton(func() config.Config {

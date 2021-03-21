@@ -8,4 +8,5 @@ var Commands = map[string]interface{}{
 	"dev/test":      test,
 	"dev/build":     buildLegacyDev,
 	"build":         buildLegacyProd,
+	"public-key":    printPublicKey,
 }

@@ -9,14 +9,13 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/go-piv/piv-go/piv"
 	"github.com/wojciech-malota-wojcik/legacy/parts"
 	"github.com/wojciech-malota-wojcik/legacy/types"
-	"os"
-	"strings"
 )
-
-var pin string
 
 // Decrypt decrypts AES key used to encrypt successor's part using private key stored on YubiKey
 func Decrypt(ciphertext []byte) ([]byte, error) {
@@ -24,47 +23,49 @@ func Decrypt(ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, card := range cards {
-		if !strings.Contains(strings.ToLower(card), "yubikey") {
+	for _, ykCard := range cards {
+		if !strings.Contains(strings.ToLower(ykCard), "yubikey") {
 			continue
 		}
-		yk, err := piv.Open(card)
-		if err != nil {
-			return nil, err
-		}
-		defer yk.Close()
-
-		cert, err := yk.Certificate(piv.SlotAuthentication)
-		if err != nil {
-			return nil, err
-		}
-
-		pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
-		if !ok {
-			return nil, errors.New("wrong format of public key on YubiKey, RSA expected")
-		}
-
-		_, err = findSuccessor(pubKey)
-		if err != nil {
-			return nil, err
-		}
-
-		if pin == "" {
-			fmt.Println("YubiKey PIN:")
-			pin = readline()
-		}
-
-		pk, err := yk.PrivateKey(piv.SlotAuthentication, cert.PublicKey, piv.KeyAuth{PIN: pin, PINPolicy: piv.PINPolicyOnce})
-		if err != nil {
-			return nil, err
-		}
-		privKey, ok := pk.(crypto.Decrypter)
-		if !ok {
-			return nil, errors.New("private key stored on YubiKey can't be used for decryption")
-		}
-		return privKey.Decrypt(rand.Reader, ciphertext, nil)
+		return decrypt(ciphertext, ykCard)
 	}
 	return nil, errors.New("no YubiKey detected")
+}
+
+func decrypt(ciphertext []byte, ykCard string) ([]byte, error) {
+	yk, err := piv.Open(ykCard)
+	if err != nil {
+		return nil, err
+	}
+	defer yk.Close()
+
+	cert, err := yk.Certificate(piv.SlotSignature)
+	if err != nil {
+		return nil, err
+	}
+
+	pubKey, ok := cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("wrong format of public key on YubiKey, RSA expected")
+	}
+
+	_, err = findSuccessor(pubKey)
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("Hello %s, provide your YubiKey PIN: ", cert.Subject.CommonName)
+
+	pin := readline()
+	pk, err := yk.PrivateKey(piv.SlotSignature, cert.PublicKey, piv.KeyAuth{PIN: pin, PINPolicy: piv.PINPolicyAlways})
+	if err != nil {
+		return nil, err
+	}
+	privKey, ok := pk.(crypto.Decrypter)
+	if !ok {
+		return nil, errors.New("private key stored on YubiKey can't be used for decryption")
+	}
+	return privKey.Decrypt(rand.Reader, ciphertext, nil)
 }
 
 func findSuccessor(pubKey *rsa.PublicKey) (types.Successor, error) {
