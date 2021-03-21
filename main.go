@@ -39,7 +39,7 @@ func integrate() error {
 
 	fmt.Print("Connect YubiKey and press ENTER...")
 	readline()
-	for {
+	for masterTree.Data == nil {
 		cards, err := piv.Cards()
 		if err != nil {
 			return fmt.Errorf("fetching YubiKey devices failed: %w", err)
@@ -77,34 +77,34 @@ func integrate() error {
 			fill(&masterTree, map[int]bool{})
 			pr := progress(&masterTree)
 			fmt.Printf("PIN correct, %d%% of seed integrated, missing bytes: %d\n", int(math.Round(100.*float64(pr)/float64(config.SeedSize))), config.SeedSize-pr)
-			if pr == config.SeedSize {
+			if masterTree.Data != nil {
 				break
 			}
 		}
 		if masterTree.Data == nil {
 			fmt.Print("Connect another YubiKey and press ENTER...")
 			readline()
-			continue
 		}
-		fmt.Println("Seed fully integrated, building decryption key, it will take some time...")
-		key := util.BuildPrivateKey(masterTree.Data)
-
-		fmt.Println("Decryption key ready, decrypting data...")
-		block, err := aes.NewCipher(key)
-		if err != nil {
-			return err
-		}
-
-		rawData := make([]byte, len(parts.Data.Data))
-
-		stream := cipher.NewCFBDecrypter(block, parts.Data.IV)
-		stream.XORKeyStream(rawData, parts.Data.Data)
-
-		if err := ioutil.WriteFile("./data.img", rawData, 0o444); err != nil {
-			return err
-		}
-		fmt.Println("Data decrypted")
 	}
+	fmt.Println("Seed fully integrated, building decryption key, it will take some time...")
+	key := util.BuildPrivateKey(masterTree.Data)
+
+	fmt.Println("Decryption key ready, decrypting data...")
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+
+	rawData := make([]byte, len(parts.Data.Data))
+
+	stream := cipher.NewCFBDecrypter(block, parts.Data.IV)
+	stream.XORKeyStream(rawData, parts.Data.Data)
+
+	if err := ioutil.WriteFile("./data.img", rawData, 0o444); err != nil {
+		return err
+	}
+	fmt.Println("Data decrypted")
+	return nil
 }
 
 func decrypt(processedPublicKeys map[string]bool, ykCard string) (successor types.Successor, decryptedKey []byte, ok bool, err error) {
