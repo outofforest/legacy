@@ -35,10 +35,11 @@ func main() {
 
 func integrate() error {
 	processedPublicKeys := map[string]bool{}
+	var masterTree types.SeedNode
+
 	fmt.Print("Connect YubiKey and press ENTER...")
 	readline()
 	for {
-		var masterTree types.SeedNode
 		cards, err := piv.Cards()
 		if err != nil {
 			return fmt.Errorf("fetching YubiKey devices failed: %w", err)
@@ -85,7 +86,10 @@ func integrate() error {
 			readline()
 			continue
 		}
+		fmt.Println("Seed fully integrated, building decryption key, it will take some time...")
 		key := util.BuildPrivateKey(masterTree.Data)
+
+		fmt.Println("Decryption key ready, decrypting data...")
 		block, err := aes.NewCipher(key)
 		if err != nil {
 			return err
@@ -96,7 +100,10 @@ func integrate() error {
 		stream := cipher.NewCFBDecrypter(block, parts.Data.IV)
 		stream.XORKeyStream(rawData, parts.Data.Data)
 
-		return ioutil.WriteFile("./data.img", rawData, 0o444)
+		if err := ioutil.WriteFile("./data.img", rawData, 0o444); err != nil {
+			return err
+		}
+		fmt.Println("Data decrypted")
 	}
 }
 
