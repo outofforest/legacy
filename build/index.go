@@ -6,5 +6,6 @@ var Commands = map[string]interface{}{
 	"dev/goimports": goImports,
 	"dev/lint":      lint,
 	"dev/test":      test,
-	"build":         buildLegacy,
+	"dev/build":     buildLegacyDev,
+	"build":         buildLegacyProd,
 }

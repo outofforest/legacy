@@ -102,7 +102,7 @@ func fill(masterNode *types.SeedNode, stack map[int]bool) {
 	if masterNode.Data != nil {
 		return
 	}
-	expectedChildren := len(config.Successors) - len(stack)
+	expectedChildren := len(parts.Successors) - len(stack)
 	if len(masterNode.Sub) < expectedChildren {
 		return
 	}

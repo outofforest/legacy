@@ -16,15 +16,33 @@ import (
 	"text/template"
 
 	"github.com/wojciech-malota-wojcik/build"
+	"github.com/wojciech-malota-wojcik/ioc"
 	"github.com/wojciech-malota-wojcik/legacy/config"
 	"github.com/wojciech-malota-wojcik/legacy/types"
 	"github.com/wojciech-malota-wojcik/legacy/util"
 )
 
-func generateLegacy() error {
-	knownParts()
+func buildLegacyProd(c *ioc.Container, deps build.DepsFunc) {
+	c.Singleton(func() config.Config {
+		return config.Prod
+	})
+	deps(buildLegacy)
+}
 
-	if err := os.Mkdir("./parts", 0o755); err != nil && !os.IsExist(err) {
+func buildLegacyDev(c *ioc.Container, deps build.DepsFunc) {
+	c.Singleton(func() config.Config {
+		return config.Dev
+	})
+	deps(buildLegacy)
+}
+
+func generateLegacy(cfg config.Config) error {
+	knownParts(cfg)
+
+	if err := os.RemoveAll("./parts"); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Mkdir("./parts", 0o755); err != nil {
 		return err
 	}
 
@@ -36,7 +54,7 @@ func generateLegacy() error {
 	// encrypt data using symmetric key
 
 	key := util.BuildPrivateKey(seed)
-	rawData, err := ioutil.ReadFile("./data.img")
+	rawData, err := ioutil.ReadFile(cfg.DataFile)
 	if err != nil {
 		return err
 	}
@@ -68,9 +86,9 @@ func generateLegacy() error {
 	// create parts
 
 	masterTree := types.SeedNode{Data: seed}
-	buildSeedTree(&masterTree, map[int]bool{})
-	ss := make([]int, 0, len(config.Successors))
-	for i, s := range config.Successors {
+	buildSeedTree(cfg, &masterTree, map[int]bool{})
+	ss := make([]int, 0, len(cfg.Successors))
+	for i, s := range cfg.Successors {
 		var sTree types.SeedNode
 		successorTree(&masterTree, &sTree, i)
 		rawTree, err := json.Marshal(sTree)
@@ -131,9 +149,9 @@ func generateLegacy() error {
 	return nil
 }
 
-func buildLegacy(ctx context.Context, deps build.DepsFunc) error {
+func buildLegacy(ctx context.Context, cfg config.Config, deps build.DepsFunc) error {
 	deps(generateLegacy)
-	return goBuildPkg(ctx, ".", "bin/my-legacy")
+	return goBuildPkg(ctx, ".", "bin/"+cfg.ExeName)
 }
 
 const tplSuccessors = `package parts
@@ -169,9 +187,9 @@ type successorEntry struct {
 	Data  types.Successor
 }
 
-func knownParts() {
+func knownParts(cfg config.Config) {
 	leafLen := 1
-	for i := len(config.Successors); i >= config.RequiredToDecrypt; i-- {
+	for i := len(cfg.Successors); i >= cfg.RequiredToDecrypt; i-- {
 		leafLen *= i
 	}
 	bytesInLeaf := int(math.Floor(float64(config.SeedSize) / float64(leafLen)))
@@ -179,10 +197,10 @@ func knownParts() {
 	if bytesInLeaf < 5 {
 		panic("minimum required bytes per leaf is 5, use longer seed")
 	}
-	sLen := len(config.Successors)
-	for i := 1; i <= config.RequiredToDecrypt; i++ {
+	sLen := len(cfg.Successors)
+	for i := 1; i <= cfg.RequiredToDecrypt; i++ {
 		known := 0.
-		for j := sLen; j >= config.RequiredToDecrypt; j-- {
+		for j := sLen; j >= cfg.RequiredToDecrypt; j-- {
 			known += (1. - known) * float64(i) / float64(j)
 		}
 		missingBytes := int(math.Floor((1. - known) * float64(config.SeedSize)))
@@ -190,15 +208,15 @@ func knownParts() {
 	}
 }
 
-func buildSeedTree(node *types.SeedNode, stack map[int]bool) {
-	numOfBuckets := len(config.Successors) - len(stack)
-	if numOfBuckets < config.RequiredToDecrypt {
+func buildSeedTree(cfg config.Config, node *types.SeedNode, stack map[int]bool) {
+	numOfBuckets := len(cfg.Successors) - len(stack)
+	if numOfBuckets < cfg.RequiredToDecrypt {
 		return
 	}
 	node.Sub = map[int]types.SeedNode{}
 	buckets := equalDiv(node.Data, numOfBuckets)
 	bI := 0
-	for i := 0; i < len(config.Successors); i++ {
+	for i := 0; i < len(cfg.Successors); i++ {
 		if stack[i] {
 			continue
 		}
@@ -207,7 +225,7 @@ func buildSeedTree(node *types.SeedNode, stack map[int]bool) {
 		}
 		stack[i] = true
 		subNode := types.SeedNode{Data: buckets[bI]}
-		buildSeedTree(&subNode, stack)
+		buildSeedTree(cfg, &subNode, stack)
 		node.Sub[i] = subNode
 		bI += 1
 		delete(stack, i)
