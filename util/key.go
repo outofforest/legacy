@@ -22,7 +22,7 @@ func BuildPrivateKey(seed []byte) []byte {
 		seed[3*len(seed)/5],
 	}
 	progress := 0
-	fmt.Printf("Computing encryption key, will take some time...\nProgress: %d%%\n", progress)
+	fmt.Printf("Decryption key generation progress: %d%%\n", progress)
 	for i := 0; i < config.SeedToKeySteps; i++ {
 		binary.LittleEndian.PutUint64(preSalt, uint64(i))
 		salt = argon2.Key(salt, preSalt, 2, 16*1024, 1, uint32(len(salt)))
