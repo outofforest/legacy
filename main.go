@@ -34,6 +34,7 @@ func main() {
 }
 
 func integrate() error {
+	processedPublicKeys := map[string]bool{}
 	fmt.Print("Connect YubiKey and press ENTER...")
 	readline()
 	for {
@@ -42,7 +43,6 @@ func integrate() error {
 		if err != nil {
 			return fmt.Errorf("fetching YubiKey devices failed: %w", err)
 		}
-		processedPublicKeys := map[string]bool{}
 		for _, ykCard := range cards {
 			if !strings.Contains(strings.ToLower(ykCard), "yubikey") {
 				continue
