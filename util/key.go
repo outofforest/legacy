@@ -30,7 +30,7 @@ func BuildPrivateKey(seed []byte) []byte {
 		newProgress := 100 * (i + 1) / config.SeedToKeySteps
 		if newProgress != progress {
 			progress = newProgress
-			fmt.Printf("Progress: %d%%\n", progress)
+			fmt.Printf("Decryption key generation progress: %d%%\n", progress)
 		}
 	}
 	return argon2.Key(seed, []byte("some very very random bytes for salt"), 5, 128*1024, 4, config.AESKeySize)
